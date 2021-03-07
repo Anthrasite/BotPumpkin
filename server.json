@@ -1,0 +1,8 @@
+{
+	"Prefix": ".",
+	"Color": "0xffa500",
+	"ServerStartRole": "Server Manager",
+	"CurrentGame": "Minecraft",
+	"CurrentGameHelp": "**1.** Open Minecraft and click on the _Multiplayer_ button.\n**2.** Click on _Add Server_.\n**3.** Enter a name to save the server under in the _Server Name_ field and enter the IP address and port into the _Server Address_ field (this should look something like `127.0.0.1:25565`).\n**4.** Click _Done_.\n**5.** Click on the new server and click _Join Server_ to join.",
+	"ServerPort": "25565"
+}
