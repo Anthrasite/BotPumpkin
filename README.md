@@ -2,7 +2,7 @@
 A simple Discord bot which includes commands for starting and stopping an AWS instance for hosting a game server.
 
 The commands supported by this bot include:
-* `slap <user>`: Prints a simple _"@BotPumpkin slapped <user>"_ message, with a small chance to slap someone else instead.
+* `slap <user>`: Prints a simple `@BotPumpkin slapped <user>` message, with a small chance to slap someone else instead.
 * `serverstart`: Starts an AWS instance.
 * `serverstop`: Stops an AWS instance.
 * `help server`: Displays information about how to connect to the game server on the AWS instance once it is running.
