@@ -3,9 +3,9 @@ A simple Discord bot which includes commands for starting and stopping an AWS in
 
 The commands supported by this bot include:
 * `slap <user>`: Prints a simple `@BotPumpkin slapped <user>` message, with a small chance to slap someone else instead.
-* `serverstart`: Starts an AWS instance.
-* `serverstop`: Stops an AWS instance.
-* `help server`: Displays information about how to connect to the game server on the AWS instance once it is running.
+* `server start`: Starts an AWS instance.
+* `server stop`: Stops an AWS instance.
+* `server help`: Displays information about how to connect to the game server on the AWS instance once it is running.
 * `help Groovy`: Displays commonly used commands for the Groovy bot.
 * `help sesh`: Displays commonly used commands for the sesh bot.
 

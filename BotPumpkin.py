@@ -30,14 +30,14 @@ logging.basicConfig(
 
 # Setup the bot configuration reader/writer
 class BotConfiguration:
-    def __init__(self):
+    def __init__(self) -> None:
         with open("server.json", "r") as file:
             self.__config = json.load(file)
 
-    def get(self, key):
+    def get(self, key: str) -> str:
         return self.__config[key]
 
-    def set(self, key, value):
+    def set(self, key: str, value: str) -> None:
         self.__config[key] = value
         with open("server.json", "w") as file:
             json.dump(self.__config, file)
@@ -51,7 +51,7 @@ bot = commands.Bot(command_prefix = config.get("Prefix"), case_insensitive = Tru
 
 # Print a status message once the bot is initialized
 @bot.event
-async def on_ready():
+async def on_ready() -> None:
     logging.info(f"Logged in as {bot.user}")
 
 
@@ -59,30 +59,21 @@ async def on_ready():
 # Help command
 # -------------------------------------------------
 
-@bot.command()
-async def help(ctx, helpType):
-    helpType = helpType.lower()
-    if (helpType == "server"):
-        await print_server_help(ctx)
-    elif (helpType == "groovy"):
-        await print_groovy_help(ctx)
-    elif (helpType == "sesh"):
-        await print_sesh_help(ctx)
-    else:
-        await print_general_help(ctx)
+@bot.group()
+async def help(ctx: commands.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        embed = discord.Embed(description = "BotPumpkin is a custom bot for starting and stopping our game server, and for doing some other fun and useful things.", color = int(config.get("Color"), 0))
+        embed.add_field(name = "`.slap`", value = "Let BotPumpkin teach someone else a lesson", inline = False)
+        embed.add_field(name = "`.server start`", value = "Starts our game server", inline = False)
+        embed.add_field(name = "`.server stop`", value = "Stops our game server", inline = False)
+        embed.add_field(name = "`.server help`", value = "Displays information about how to connect to the game server once it is running", inline = False)
+        embed.add_field(name = "`.help Groovy`", value = "Displays commonly used commands for Groovy", inline = False)
+        embed.add_field(name = "`.help sesh`", value = "Displays commonly used commands for sesh", inline = False)
+        embed.set_author(name = bot.user.name, icon_url = bot.user.avatar_url)
+        await ctx.send(embed = embed)
 
-@help.error
-async def help_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument):
-        await print_general_help(ctx)
-
-async def print_server_help(ctx):
-    image = discord.File(f"Icons/{config.get('CurrentGame')}.png", "icon.png")
-    embed = discord.Embed(title = f"Connecting to the {config.get('CurrentGame')} server:", description = config.get("CurrentGameHelp"), color = int(config.get("Color"), 0))
-    embed.set_thumbnail(url = "attachment://icon.png")
-    await ctx.send(file = image, embed = embed)
-
-async def print_groovy_help(ctx):
+@help.command(name = "groovy")
+async def help_groovy(ctx: commands.Context) -> None:
     groovy = None
     for user in bot.users:
         if user.name == "Groovy":
@@ -111,7 +102,8 @@ async def print_groovy_help(ctx):
         embed.set_author(name = "Groovy")
     await ctx.send(embed = embed)
 
-async def print_sesh_help(ctx):
+@help.command(name = "sesh")
+async def help_sesh(ctx: commands.Context) -> None:
     sesh = None
     for user in bot.users:
         if user.name == "sesh":
@@ -130,31 +122,20 @@ async def print_sesh_help(ctx):
         embed.set_author(name = "sesh")
     await ctx.send(embed = embed)
 
-async def print_general_help(ctx):
-    embed = discord.Embed(description = "BotPumpkin is a custom bot for starting and stopping our game server, and for doing some other fun and useful things.", color = int(config.get("Color"), 0))
-    embed.add_field(name = "`.slap`", value = "Let BotPumpkin teach someone else a lesson", inline = False)
-    embed.add_field(name = "`.serverstart`", value = "Starts our game server", inline = False)
-    embed.add_field(name = "`.serverstop`", value = "Stops our game server", inline = False)
-    embed.add_field(name = "`.help server`", value = "Displays information about how to connect to the game server once it is running", inline = False)
-    embed.add_field(name = "`.help Groovy`", value = "Displays commonly used commands for Groovy", inline = False)
-    embed.add_field(name = "`.help sesh`", value = "Displays commonly used commands for sesh", inline = False)
-    embed.set_author(name = bot.user.name, icon_url = bot.user.avatar_url)
-    await ctx.send(embed = embed)
-
 # -------------------------------------------------
 # Slap command
 # -------------------------------------------------
 
 # Gets BotPumpkin to slap the specified user (usually)
 @bot.command()
-async def slap(ctx, *, member: discord.Member):
+async def slap(ctx: commands.Context, member: discord.Member) -> None:
     if random.randint(1, 100) == 100:
         await send_simple_embed(ctx, f"{bot.user.mention} slapped {random.choice(ctx.guild.members).mention} instead!")
     await send_simple_embed(ctx, f"{bot.user.mention} slapped {member.mention}!")
 
 # If the specified user cannot be found, slap the user who asked instead
 @slap.error
-async def slap_error(ctx, error):
+async def slap_error(ctx: commands.Context, error: discord.DiscordException) -> None:
     if isinstance(error, commands.BadArgument):
         await send_simple_embed(ctx, f"{bot.user.mention} didn't know who to slap, so {ctx.author.mention} was slapped instead!")
     elif isinstance(error, commands.MissingRequiredArgument):
@@ -167,7 +148,7 @@ async def slap_error(ctx, error):
 
 # Holds the necessary configuration information for an AWS instance
 class InstanceState:
-    def __init__(self, instance):
+    def __init__(self, instance: dict) -> None:
         self.state = instance["State"]["Name"]
         self.imageId = instance["ImageId"]
         if "PublicIpAddress" in instance:
@@ -179,26 +160,26 @@ class InstanceState:
 # Performs necessary management of an AWS instance
 class AWSInstanceManager:
     # Create the AWS connection
-    def __init__(self):
+    def __init__(self) -> None:
         self.__client = boto3.client("ec2", aws_access_key_id = os.getenv("ACCESS_KEY"), aws_secret_access_key = os.getenv("SECRET_KEY"), region_name = os.getenv("EC2_REGION"))
 
     # Gets all instances on the AWS client
-    def get_instance_list(self):
+    def get_instance_list(self) -> dict:
         response = self.__client.describe_instances(InstanceIds = [ os.getenv("INSTANCE_ID") ])
         return response["Reservations"][0]["Instances"]
 
     # Starts an instance and queries it until it"s running
-    async def start_instance(self):
+    async def start_instance(self) -> InstanceState:
         self.__client.start_instances(InstanceIds = [ os.getenv("INSTANCE_ID") ])
         return await self.__query_instance("running")
 
     # Stops an instance and queries it until it has stopped
-    async def stop_instance(self):
+    async def stop_instance(self) -> InstanceState:
         self.__client.stop_instances(InstanceIds = [ os.getenv("INSTANCE_ID") ])
         return await self.__query_instance("stopped")
 
     # Queries the instance, sleeping for 3 seconds between each query, until the instance has the desired state
-    async def __query_instance(self, desiredState):
+    async def __query_instance(self, desiredState: str) -> InstanceState:
         instanceState = None
         state = ""
         while not (state == desiredState):
@@ -211,10 +192,22 @@ instanceLock = asyncio.Lock()
 instanceState = None
 reminderSent = False
 
+
+@bot.group()
+async def server(ctx: commands.Context) -> None:
+    pass
+
+@server.command(name = "help")
+async def server_help(ctx: commands.Context) -> None:
+    image = discord.File(f"Icons/{config.get('CurrentGame')}.png", "icon.png")
+    embed = discord.Embed(title = f"Connecting to the {config.get('CurrentGame')} server:", description = config.get("CurrentGameHelp"), color = int(config.get("Color"), 0))
+    embed.set_thumbnail(url = "attachment://icon.png")
+    await ctx.send(file = image, embed = embed)
+
 # Starts the AWS instance
-@bot.command(name = "startserver")
+@server.command(name = "start")
 @commands.has_role(config.get('ServerManagementRole'))
-async def start_server(ctx):
+async def server_start(ctx: commands.Context) -> None:
     channelId = discord.utils.get(ctx.guild.channels, name = config.get('ServerManagementChannel')).id
     if ctx.channel.id is not channelId:
         await bot.get_channel(channelId).send(embed = discord.Embed(description = "Please send server management commands in this channel only.", color = int(config.get("Color"), 0)))
@@ -253,14 +246,14 @@ async def start_server(ctx):
         await bot.change_presence(activity = discord.Game(config.get('CurrentGame')))
 
 # If the user calling the command doesn't have the "Server Manager" role, inform them they need it
-@start_server.error
-async def start_server_error(ctx, error):
+@server_start.error
+async def server_start_error(ctx: commands.Context, error: discord.DiscordException) -> None:
     if isinstance(error, commands.MissingRole):
         await send_simple_embed(ctx, f"You must have the {config.get('ServerManagementRole')} role to run this command.")
 
 # Stops the AWS instance
-@bot.command(name = "stopserver")
-async def stop_server(ctx):
+@server.command(name = "stop")
+async def server_stop(ctx: commands.Context) -> None:
     channelId = discord.utils.get(ctx.guild.channels, name = config.get('ServerManagementChannel')).id
     if ctx.channel.id is not channelId:
         await bot.get_channel(channelId).send(embed = discord.Embed(description = "Please send server management commands in this channel only.", color = int(config.get("Color"), 0)))
@@ -298,7 +291,7 @@ async def stop_server(ctx):
 
 # Send a reminder if all users aren't playing the current game and the server is still running
 @bot.event
-async def on_member_update(before: discord.Member, after: discord.Member):
+async def on_member_update(before: discord.Member, after: discord.Member) -> None:
     global instanceState
     global reminderSent
     if instanceState is None:
@@ -326,8 +319,7 @@ async def on_member_update(before: discord.Member, after: discord.Member):
                 await send_simple_embed_to_channel(after.guild, config.get('ServerManagementChannel'), f"@here, the {config.get('CurrentGame')} server is running, but it looks like no one is playing {config.get('CurrentGame')} anymore. Please run `{config.get('Prefix')}stopserver` to stop the server if you're finished playing!")
                 reminderSent = True
 
-
-async def log_server_error(ctx: commands.Context, attemptedServerState: str, errorPnemonic: str, *errorComponents: str):
+async def log_server_error(ctx: commands.Context, attemptedServerState: str, errorPnemonic: str, *errorComponents: str) -> None:
     await log_error_with_context(ctx, f"Error occurred while trying to {attemptedServerState} the {config.get('CurrentGame')} server.", errorPnemonic, *errorComponents)
 
 
@@ -335,15 +327,15 @@ async def log_server_error(ctx: commands.Context, attemptedServerState: str, err
 # Utility functions & classes
 # -------------------------------------------------
 
-async def send_simple_embed(ctx,  message):
+async def send_simple_embed(ctx: commands.Context,  message: str) -> discord.Message:
     return await ctx.send(embed = discord.Embed(description = message, color = int(config.get("Color"), 0)))
 
-async def send_simple_embed_to_channel(guild: discord.Guild, channelName: str, message: str):
+async def send_simple_embed_to_channel(guild: discord.Guild, channelName: str, message: str) -> discord.Message:
     channelId = discord.utils.get(guild.channels, name = channelName).id
     channel = bot.get_channel(channelId)
     return await channel.send(embed = discord.Embed(description = message, color = int(config.get("Color"), 0)))
 
-async def log_error_with_context(ctx: commands.Context, errorMessage: str, errorPnemonic: str, *errorComponents: str):
+async def log_error_with_context(ctx: commands.Context, errorMessage: str, errorPnemonic: str, *errorComponents: str) -> None:
     await send_simple_embed(ctx, errorMessage)
     if len(errorComponents) > 0:
         for component in errorComponents:
