@@ -1,3 +1,4 @@
 .env
 rootkey.csv
-*.log
+logs/
+__pycache__/
