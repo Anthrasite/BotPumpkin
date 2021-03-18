@@ -5,6 +5,7 @@ The commands supported by this bot include:
 * `slap <user>`: Prints a simple `@BotPumpkin slapped <user>` message, with a small chance to slap someone else instead.
 * `server start`: Starts an AWS instance.
 * `server stop`: Stops an AWS instance.
+* `server status`: Returns the status of the AWS instance (admin only).
 * `help Groovy`: Displays commonly used commands for the Groovy bot.
 * `help sesh`: Displays commonly used commands for the sesh bot.
 

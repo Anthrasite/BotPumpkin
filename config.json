@@ -6,6 +6,7 @@
         "command-channel": "server-management",
         "admin-command-role": "Game Server Admin",
         "user-command-role": "Game Server User",
+        "default-timezone": "America/Winnipeg",
         "current-game": "Minecraft",
         "server-port": "25565"
     }

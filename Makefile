@@ -25,6 +25,7 @@ update:
 	fi
 
 	@if git pull; then \
+		$(PIP) install -r requirements.txt
 		screen -d -m -S BotPumpkin $(PYTHON) botpumpkin/bot.py; \
 	else \
 		@echo "Update failed: Unable to update repository"; \

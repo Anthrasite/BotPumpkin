@@ -1,10 +1,12 @@
 import os
 import asyncio
 from enum import Enum
+from datetime import datetime
 
 import discord
 from discord.ext import commands
 import boto3
+import pytz
 
 from config import config
 from util import *
@@ -44,10 +46,9 @@ class InstanceDescription:
         instance = instance_description["Reservations"][0]["Instances"][0]
         self.state = InstanceState(instance["State"]["Name"])
         self.image_id = instance["ImageId"]
-        if "PublicIpAddress" in instance:
-            self.public_ip_address = instance["PublicIpAddress"]
-        else:
-            self.public_ip_address = ""
+        self.launch_time = instance["LaunchTime"]
+        self.public_ip_address = instance["PublicIpAddress"] if "PublicIpAddress" in instance else ""
+        self.public_dns_name = instance["PublicDnsName"] if "PublicDnsName" in instance else ""
         log.info(f"Instance {self.image_id} is currently in state {self.state.value}")
 
 class InstanceManager:
@@ -183,6 +184,38 @@ class Server(commands.Cog):
             await send_simple_embed(ctx, f"The server was unable to be started.")
         else:
             raise error
+
+    @server.command(name = "status")
+    @commands.guild_only()
+    @commands.has_role(config["server"]["admin-command-role"])
+    async def server_status(self, ctx: commands.Context) -> None:
+        """Returns the status of the AWS instance"""
+        async with self.instance_lock:
+            instance_manager = InstanceManager()
+            self.instance_description = instance_manager.get_instance_description()
+
+            status_emote = f":{self._get_state_color(self.instance_description.state)}_circle:"
+
+            embed = discord.Embed(title = f"Status of {self.instance_description.image_id}", color = int(config["color"], 0))
+            embed.add_field(name = "State", value = f"{status_emote} {self.instance_description.state.value.capitalize()}", inline = False)
+            embed.add_field(name = "Last launch time", value = f"{self.instance_description.launch_time.astimezone(pytz.timezone(config['server']['default-timezone']))}", inline = False)
+            if self.instance_description.state == InstanceState.RUNNING:
+                embed.add_field(name = "IP address", value = f"`{self.instance_description.public_ip_address}`", inline = False)
+                embed.add_field(name = "DNS name", value = f"`{self.instance_description.public_dns_name}`", inline = False)
+
+            await ctx.send(embed = embed)
+
+    def _get_state_color(self, state: InstanceState) -> str:
+        if self.instance_description.state == InstanceState.RUNNING:
+            return "green"
+        elif self.instance_description.state == InstanceState.STOPPED:
+            return "red"
+        elif self.instance_description.state == InstanceState.PENDING:
+            return "yellow"
+        elif self.instance_description.state == InstanceState.STOPPING:
+            return "orange"
+        else:
+           return "black"
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
