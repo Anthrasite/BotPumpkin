@@ -48,7 +48,7 @@ create-env:
 	fi
 
 run: # Runs the bot
-	screen -d -m -S BotPumpkin pipenv run botpumpkin\\bot.py
+	screen -d -m -S BotPumpkin pipenv run python3.9 botpumpkin/bot.py
 
 stop: # Stops the bot
 	screen -S BotPumpkin -X quit
