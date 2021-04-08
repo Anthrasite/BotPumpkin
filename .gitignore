@@ -1,4 +1,16 @@
+# IDE settings
+.idea/
+.vscode/
+
+# Configuration files which may contain application secrets
 .env
 rootkey.csv
+
+# Log files
 logs/
+
+# Python bytecode
 __pycache__/
+
+# Mypy files
+.mypy_cache

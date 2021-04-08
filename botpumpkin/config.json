@@ -1,0 +1,59 @@
+{
+    "prefix": ".",
+    "owner-id": 432781380418535455,
+    "colors": {
+        "default": "0xffa500",
+        "error": "0xda2d44",
+        "warning": "0xffcc4d"
+    },
+    "misc": {
+        "enabled": true,
+        "slap-random-chance": 0.4
+    },
+    "server": {
+        "enabled": true,
+        "command-channel": "server-management",
+        "admin-command-role": "Game Server Admin",
+        "user-command-role": "Game Server User",
+        "default-timezone": "America/Winnipeg",
+        "games": {
+            "Minecraft": {
+                "port": "25565",
+                "commands": {
+                    "start": [
+                        "runuser -l ubuntu -c 'cd /home/ubuntu/Minecraft/ && screen -d -m -S Minecraft java -Xms1G -Xmx3G -jar forge-1.16.4-35.1.37.jar --nogui --universe universe/'"
+                    ],
+                    "stop": [
+                        "runuser -l ubuntu -c 'screen -S Minecraft -p 0 -X stuff \"stop^M\"'",
+                        "sleep 10"
+                    ],
+                    "ping": [
+                        "runuser -l ubuntu -c 'mcstatus localhost ping'"
+                    ],
+                    "query-player-count": [
+                        "runuser -l ubuntu -c 'mcstatus localhost status | grep \"players:\" | cut -d \"/\" -f1 | cut -d \" \" -f2'"
+                    ]
+                }
+            },
+            "All The Mods 6": {
+                "port": "25565",
+                "commands": {
+                    "start": [
+                        "runuser -l ubuntu -c 'cd /home/ubuntu/Minecraft_AllTheMods6/ && screen -d -m -S AllTheMods6 bash ./startserver.sh'"
+                    ],
+                    "stop": [
+                        "runuser -l ubuntu -c 'screen -S AllTheMods6 -p 0 -X stuff \"stop^M\"'",
+                        "sleep 10",
+                        "runuser -l ubuntu -c 'screen -S AllTheMods6 -p 0 -X stuff \"^C\"'"
+                    ],
+                    "ping": [
+                        "runuser -l ubuntu -c 'mcstatus localhost ping'"
+                    ],
+                    "query-player-count": [
+                        "runuser -l ubuntu -c 'mcstatus localhost status | grep \"players:\" | cut -d \"/\" -f1 | cut -d \" \" -f2'"
+                    ]
+                }
+            }
+        }
+    }
+}

@@ -4,13 +4,20 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+"discord.py" = "*"
 boto3 = "*"
 python-dotenv = "*"
-"discord.py" = "*"
 pytz = "*"
 
 [dev-packages]
+"discord.py-stubs" = "*"
+autopep8 = "*"
+boto3-stubs = {extras = ["ec2", "ssm"], version = "*"}
 mypy = "*"
+pycodestyle = "*"
+pydocstyle = "*"
+pylint = "*"
+rope = "*"
 
 [requires]
 python_version = "3.9"

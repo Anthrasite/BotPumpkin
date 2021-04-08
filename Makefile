@@ -6,13 +6,14 @@ help:
 
 install: # Installs dependencies for running the bot
 	@$(MAKE) install-pipenv --no-print-directory
-	pipenv install --ignore-pipfile
+	pipenv sync
 	@$(MAKE) create-env --no-print-directory
 
 install-dev: # Installs dependencies for running the bot in a development environment
 	@$(MAKE) install-pipenv --no-print-directory
 	pipenv install --dev
 	@$(MAKE) create-env --no-print-directory
+	pipenv run pre-commit install
 
 install-pipenv:
 	@$(MAKE) install-python3.9 --no-print-directory
@@ -48,7 +49,7 @@ create-env:
 	fi
 
 run: # Runs the bot
-	screen -d -m -S BotPumpkin pipenv run python3.9 botpumpkin/bot.py
+	screen -d -m -S BotPumpkin pipenv run python3.9 -m botpumpkin -OO
 
 stop: # Stops the bot
 	screen -S BotPumpkin -X quit
