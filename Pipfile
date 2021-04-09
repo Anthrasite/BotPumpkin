@@ -4,15 +4,15 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+"discord.py-stubs" = "*"
 "discord.py" = "*"
 boto3 = "*"
+boto3-stubs = {extras = ["ec2", "ssm"], version = "*"}
 python-dotenv = "*"
 pytz = "*"
 
 [dev-packages]
-"discord.py-stubs" = "*"
 autopep8 = "*"
-boto3-stubs = {extras = ["ec2", "ssm"], version = "*"}
 mypy = "*"
 pycodestyle = "*"
 pydocstyle = "*"
