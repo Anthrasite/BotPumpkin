@@ -29,11 +29,11 @@ async def send_simple_embed(context: commands.Context, message: str, color: str 
 
 # *** send_simple_embed_to_channel ******************************************
 
-async def send_simple_embed_to_channel(guild: discord.Guild, channel_name: str, message: str, color: str = config["colors"]["default"]) -> discord.Message:
+async def send_simple_embed_to_channel(bot: commands.Bot, channel_name: str, message: str, color: str = config["colors"]["default"]) -> discord.Message:
     """Send a simple embed message to the channel with the given name in the given guild, using the given message and an optional colour.
 
     Args:
-        guild (discord.Guild): The guild containing the channel to send the message to.
+        bot (commands.Bot): The bot containing the guild with the channel to send the message to.
         channel_name (int): The name of the channel to send the message to.
         message (str): The contents of the message
         color (str, optional): The colour that will be used in the embed. Defaults to config["colors"]["default"].
@@ -41,6 +41,7 @@ async def send_simple_embed_to_channel(guild: discord.Guild, channel_name: str, 
     Returns:
         discord.Message: The embed message that was sent.
     """
+    guild: discord.Guild = bot_util.get_guild(bot, config["guild-id"])
     channel: discord.TextChannel = guild_util.get_channel_by_name(guild, channel_name)
     return await channel.send(embed = discord.Embed(description = message, color = int(color, 0)))
 
@@ -80,15 +81,16 @@ def add_field_to_embed(embed: discord.Embed, name: str, value: str) -> None:
 
 # *** send_simple_here_mention_to_channel ***********************************
 
-async def send_simple_here_mention_to_channel(guild: discord.Guild, channel_name: str) -> discord.Message:
+async def send_simple_here_mention_to_channel(bot: commands.Bot, channel_name: str) -> discord.Message:
     """Send a simple message containing only a @here mention to the channel with the given name in the given guild.
 
     Args:
-        guild (discord.Guild): The guild containing the channel to send the message to.
+        bot (commands.Bot): The bot containing the guild with the channel to send the message to.
         channel_name (int): The name of the channel to send the message to.
 
     Returns:
         discord.Message: The message that was sent.
     """
+    guild: discord.Guild = bot_util.get_guild(bot, config["guild-id"])
     channel: discord.TextChannel = guild_util.get_channel_by_name(guild, channel_name)
     return await channel.send("@here:")

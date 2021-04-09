@@ -1,5 +1,6 @@
 """A collection of classes to assist with using an AWS System Manager client from the boto3 library."""
 import asyncio
+import logging
 from enum import Enum
 from typing import List
 
@@ -12,6 +13,8 @@ from mypy_boto3_ssm.type_defs import GetCommandInvocationResultTypeDef, SendComm
 
 # First party imports
 from botpumpkin.aws.error import client_error_is_instance
+
+_log: logging.Logger = logging.getLogger(__name__)
 
 
 # *** CommandExceededAttempts ***********************************************
@@ -70,8 +73,8 @@ class CommandInvocation:
         """
         self.instance_commands: List[str] = instance_commands
         self.status: CommandStatus = CommandStatus(command_invocation["Status"])
-        self.output: str = command_invocation["StandardOutputContent"]
-        self.error_output: str = command_invocation["StandardErrorContent"]
+        self.output: str = command_invocation["StandardOutputContent"].strip()
+        self.error_output: str = command_invocation["StandardErrorContent"].strip()
 
     def __str__(self) -> str:
         """Return a string of basic command invocation information.
@@ -194,4 +197,6 @@ class InstanceCommandRunner:
             CommandInvocation: The status information of the command invocation.
         """
         response: GetCommandInvocationResultTypeDef = self._client.get_command_invocation(CommandId = command_id, InstanceId = self._instance_id)
-        return CommandInvocation(response, instance_commands)
+        invocation: CommandInvocation = CommandInvocation(response, instance_commands)
+        _log.info(invocation)
+        return invocation

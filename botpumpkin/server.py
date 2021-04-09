@@ -8,10 +8,9 @@ from typing import Optional
 # Third party imports
 import discord
 import pytz
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 # First party imports
-import botpumpkin.discord.activity as activity_util
 import botpumpkin.discord.check as custom_checks
 import botpumpkin.discord.context as context_util
 import botpumpkin.discord.error as error_util
@@ -108,15 +107,7 @@ class ServerMaintenanceInProgress(commands.CommandError):
 # *** Server ****************************************************************
 
 class Server(commands.Cog):
-    """Command cog containing commands for managing a game server run on an AWS instance.
-
-    Attributes:
-        bot (commands.Bot): The bot the cog will be added to.
-        instance_lock (asyncio.Lock): A lock which controls access to the state of the AWS instance.
-        self.instance_description (Optional[InstanceDescription]): The most recent description of the AWS instance.
-        self.current_game (Optional[str]): The game server that is currently running on the AWS instance, if any.
-        self.stop_reminder_sent (bool): Whether a reminder has been sent to stop the game server or not.
-    """
+    """Command cog containing commands for managing a game server run on an AWS instance."""
 
     def __init__(self, bot: commands.Bot) -> None:
         """Initialize the Server cog, setting up the necessary parameters.
@@ -129,12 +120,11 @@ class Server(commands.Cog):
         self._aws_secret_access_key: str = os.environ["SECRET_KEY"]
         self._region_name: str = os.environ["EC2_REGION"]
 
-        self.bot: commands.Bot = bot
-        self.instance_lock: asyncio.Lock = asyncio.Lock()
-        self.instance_description: Optional[InstanceDescription] = None
-        self.current_game: Optional[str] = None
-        self.stop_reminder_sent: bool = False
-        self.maintenance: bool = False
+        self._bot: commands.Bot = bot
+        self._instance_lock: asyncio.Lock = asyncio.Lock()
+        self._current_game: Optional[str] = None
+        self._maintenance: bool = False
+        self._instance_query_no_players_count: int = -1
 
     # *** server ****************************************************************
 
@@ -164,54 +154,52 @@ class Server(commands.Cog):
             InstanceChangeToCurrentStateError: Raised when this command is called when the instance is already running.
             InvalidInstanceStateError: Raised when the instance has an unexpected state.
         """
-        self._check_no_maintenance()
-        self._check_valid_game(game)
+        async with self._instance_lock:
+            self._check_no_maintenance()
+            self._check_valid_game(game)
 
-        async with self.instance_lock:
-            instance_manager: InstanceManager = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)
-            self.instance_description = instance_manager.get_instance_description()
-            _log.info(self.instance_description)
+            instance_manager: InstanceManager = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key,
+                                                                self._region_name)
+            instance_description: InstanceDescription = instance_manager.get_instance_description()
 
             # Error handling for invalid states when starting the server
-            if self.instance_description.state == InstanceState.RUNNING:
-                if self.current_game is None:
+            if instance_description.state == InstanceState.RUNNING:
+                if self._current_game is None:
                     await self._warn_instance_running_without_game()
                 raise InstanceChangeToCurrentStateError()
-            if self.instance_description.state != InstanceState.STOPPED:
-                raise InvalidInstanceStateError(self.instance_description.state.value)
+            if instance_description.state != InstanceState.STOPPED:
+                raise InvalidInstanceStateError(instance_description.state.value)
 
             # Send a message indicating the server is starting
             progress_message: discord.Message = await message_util.send_simple_embed(context, "Starting the server...")
 
             # Start the instance
-            self.instance_description = await instance_manager.start_instance()
-            _log.info(self.instance_description)
+            instance_description = await instance_manager.start_instance()
 
             # Start the requested game
-            instance_command_runner: InstanceCommandRunner = InstanceCommandRunner(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)
-            command_invocation: CommandInvocation = await instance_command_runner.run_commands(config['server']['games'][game]['commands']['start'])
-            _log.info(command_invocation)
-
-            # Indicate that no reminder to stop the server has been sent
-            self.stop_reminder_sent = False
+            instance_command_runner: InstanceCommandRunner = InstanceCommandRunner(self._instance_id, self._aws_access_key_id,
+                                                                                   self._aws_secret_access_key, self._region_name)
+            await instance_command_runner.run_commands(config["server"]["games"][game]["commands"]["start"])
 
             # Save the currently running game and update the bot activity
             await self._set_current_game(game)
 
             # Attempt to reach the game server,
             progress_message_text: str = "The server is now running. Connect to "\
-                f"`{self.instance_description.public_ip_address}:{config['server']['games'][game]['port']}` to join the fun!"
+                f"`{instance_description.public_ip_address}:{config['server']['games'][game]['port']}` to join the fun!"
             try:
-                command_invocation = await instance_command_runner.run_commands_until_success(config['server']['games'][game]['commands']['ping'])
-                _log.info(command_invocation)
+                await instance_command_runner.run_commands_until_success(config["server"]["games"][game]["commands"]["ping"])
             except (CommandExceededAttempts, CommandExceededWaitTime):
                 progress_message_text = "The server is now running, but the game was unable to be reached, so something may have gone "\
-                    f"wrong. Try connecting to `{self.instance_description.public_ip_address}:{config['server']['games'][game]['port']}` and contact "\
+                    f"wrong. Try connecting to `{instance_description.public_ip_address}:{config['server']['games'][game]['port']}` and contact "\
                     "an admin if you're unable to connect."
 
             # Delete the progress message and send a confirmation message
             await progress_message.delete()
             await message_util.send_simple_embed(context, progress_message_text)
+
+            # Start the instance query loop
+            self.query_instance_usage.start()
 
     @server_start.error
     async def server_start_error(self, context: commands.Context, exception: commands.CommandError) -> None:
@@ -223,7 +211,7 @@ class Server(commands.Cog):
         """
         if isinstance(exception, commands.MissingRequiredArgument):
             message_text = "You must specify which game you wish to start on the server.\n"\
-                f"For example: `{self.bot.command_prefix}{context.command} {list(config['server']['games'].keys())[0]}`"
+                f"For example: `{self._bot.command_prefix}{context.command} {list(config['server']['games'].keys())[0]}`"
             await message_util.send_simple_embed(context, message_text)
         elif isinstance(exception, InvalidGameError):
             await message_util.send_simple_embed(context, f"The game _{exception.requested_game}_ isn't setup to run on the server.")
@@ -248,34 +236,35 @@ class Server(commands.Cog):
             InstanceChangeToCurrentStateError: Raised when this command is called when the instance is already stopped.
             InvalidInstanceStateError: Raised when the instance has an unexpected state.
         """
-        self._check_no_maintenance()
+        async with self._instance_lock:
+            self._check_no_maintenance()
 
-        async with self.instance_lock:
-            instance_manager: InstanceManager = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)
-            self.instance_description = instance_manager.get_instance_description()
-            _log.info(self.instance_description)
+            instance_manager: InstanceManager = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key,
+                                                                self._region_name)
+            instance_description: InstanceDescription = instance_manager.get_instance_description()
 
             # Error handling for invalid states when stopping the server
-            if self.instance_description.state == InstanceState.STOPPED:
+            if instance_description.state == InstanceState.STOPPED:
                 raise InstanceChangeToCurrentStateError()
-            if self.instance_description.state != InstanceState.RUNNING:
-                raise InvalidInstanceStateError(self.instance_description.state.value)
+            if instance_description.state != InstanceState.RUNNING:
+                raise InvalidInstanceStateError(instance_description.state.value)
 
-            if self.current_game is None:
+            if self._current_game is None:
                 await self._warn_instance_running_without_game()
+
+            # Stop the instance query loop
+            self.query_instance_usage.cancel()
 
             # Send a message indicating the server is stopping
             progress_message: discord.Message = await message_util.send_simple_embed(context, "Stopping the server...")
 
-            # Stop the requested game
-            if self.current_game is not None:
-                instance_command_runner: InstanceCommandRunner = InstanceCommandRunner(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)
-                command_invocation: CommandInvocation = await instance_command_runner.run_commands(config['server']['games'][self.current_game]['commands']['stop'])
-                _log.info(command_invocation)
+            # Stop the current game
+            if self._current_game is not None:
+                await InstanceCommandRunner(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)\
+                    .run_commands(config["server"]["games"][self._current_game]["commands"]["stop"])
 
             # Stop the instance
-            self.instance_description = await instance_manager.stop_instance()
-            _log.info(self.instance_description)
+            await instance_manager.stop_instance()
 
             # Delete the progress message and send a confirmation message
             await progress_message.delete()
@@ -297,75 +286,6 @@ class Server(commands.Cog):
         else:
             await self._log_command_error(context, exception)
 
-    # *** server status *********************************************************
-
-    @server.command(name = "status")
-    @commands.has_any_role(config["server"]["admin-command-role"], config["server"]["user-command-role"])
-    @custom_checks.is_channel_for_role(config["server"]["command-channel"], config["server"]["user-command-role"])
-    @commands.max_concurrency(1)
-    async def server_status(self, context: commands.Context) -> None:
-        """Print the status of the AWS instance.
-
-        Args:
-            context (commands.Context): The context of the command.
-        """
-        admin_status = discord.utils.get(context_util.get_author(context).roles, name = config["server"]["admin-command-role"])
-        if not admin_status:
-            self._check_no_maintenance()
-
-        async with self.instance_lock:
-            instance_manager: InstanceManager = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)
-            self.instance_description = instance_manager.get_instance_description()
-            _log.info(self.instance_description)
-
-            # Retrieve the current player count
-            current_game: str = self.current_game if self.current_game is not None else "None"
-            if self.current_game is not None:
-                command_manager: InstanceCommandRunner = InstanceCommandRunner(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)
-                invocation: CommandInvocation = await command_manager.run_commands(config['server']['games'][self.current_game]['commands']['query-player-count'])
-                player_count: int = int(invocation.output) if invocation.status == CommandStatus.SUCCESS and invocation.output.isdigit() else 0
-
-            if admin_status:
-                # Get additional admin-only information, including the launch time and server ping
-                state: str = f":{self._get_state_color()}_circle: {self.instance_description.state.value.capitalize()}"
-                launch_time: datetime = self.instance_description.launch_time.astimezone(pytz.timezone(config['server']['default-timezone']))
-                if self.current_game is not None:
-                    invocation = await command_manager.run_commands(config['server']['games'][self.current_game]['commands']['ping'])
-                    ping: str = invocation.output if invocation.status == CommandStatus.SUCCESS else "Connection failed"
-
-                # Create and send the embed with user and admin-only information
-                embed: discord.Embed = discord.Embed(title = f"Status of {self.instance_description.image_id}", color = int(config["colors"]["default"], 0))
-                message_util.add_field_to_embed(embed, "State", state)
-                if self.instance_description.state == InstanceState.RUNNING:
-                    message_util.add_field_to_embed(embed, "Current game", f"{':warning: ' if self.current_game is None else ''}{current_game}")
-                    if self.current_game is not None:
-                        message_util.add_field_to_embed(embed, "Game server ping", ping)
-                        message_util.add_field_to_embed(embed, "Current players", str(player_count))
-                    message_util.add_field_to_embed(embed, "IP address", f"`{self.instance_description.public_ip_address}`")
-                    message_util.add_field_to_embed(embed, "DNS name", f"`{self.instance_description.public_dns_name}`")
-                message_util.add_field_to_embed(embed, "Last launch time", str(launch_time))
-                await context.send(embed = embed)
-            else:
-                # Create and send the simple embed with user information
-                message = f"The server is currently {self.instance_description.state.value.lower()}"
-                if self.instance_description.state == InstanceState.RUNNING and self.current_game is not None:
-                    message += f" the game {self.current_game} and there {'is' if player_count == 1 else 'are'} "\
-                        f"{player_count} {'person' if player_count == 1 else 'people'} playing. Connect to "\
-                        f"`{self.instance_description.public_ip_address}:{config['server']['games'][self.current_game]['port']}` to join the fun!"
-                else:
-                    message += "."
-                await message_util.send_simple_embed(context, message)
-
-    @server_status.error
-    async def server_status_error(self, context: commands.Context, exception: commands.CommandError) -> None:
-        """Error handler for the server status command, which prints an error message based on the error raised.
-
-        Args:
-            context (commands.Context): The context of the command.
-            exception (commands.CommandError): The exception which was thrown by the command.
-        """
-        await self._log_command_error(context, exception)
-
     # *** server change *********************************************************
 
     @server.command(name = "change")
@@ -383,52 +303,55 @@ class Server(commands.Cog):
             InvalidGameError: Raised when no configuration is found for the game requested.
             GameAlreadyRunningError: Raised when the requested game is already running on the AWS instance.
             InstanceNotRunningError: Raised when the AWS instance isn't running.
+            InvalidInstanceStateError: Raised when the instance has an unexpected state.
         """
-        self._check_no_maintenance()
-        self._check_valid_game(game)
-        self._check_game_not_running(game)
+        async with self._instance_lock:
+            self._check_no_maintenance()
+            self._check_valid_game(game)
+            self._check_game_not_running(game)
 
-        async with self.instance_lock:
-            instance_manager: InstanceManager = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)
-            self.instance_description = instance_manager.get_instance_description()
-            _log.info(self.instance_description)
+            instance_description: InstanceDescription = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)\
+                .get_instance_description()
 
-            if self.instance_description.state != InstanceState.RUNNING:
-                raise InstanceNotRunningError()
-            if self.current_game is None:
+            if instance_description.state != InstanceState.RUNNING:
+                if instance_description.state == InstanceState.STOPPED:
+                    raise InstanceNotRunningError()
+                raise InvalidInstanceStateError(instance_description.state.value)
+            if self._current_game is None:
                 await self._warn_instance_running_without_game()
+
+            # Stop the instance query loop
+            self.query_instance_usage.cancel()
 
             # Send a message indicating the game running on the server is changing
             progress_message: discord.Message = await message_util.send_simple_embed(context, "Changing the game running on the server...")
 
             # Stop the current game and start the new game
-            instance_command_runner: InstanceCommandRunner = InstanceCommandRunner(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)
-            if self.current_game is not None:
-                command_invocation: CommandInvocation = await instance_command_runner.run_commands(config['server']['games'][self.current_game]['commands']['stop'])
-                _log.info(command_invocation)
-            command_invocation = await instance_command_runner.run_commands(config['server']['games'][game]['commands']['start'])
-            _log.info(command_invocation)
-
-            # Reset the reminder to stop the server
-            self.stop_reminder_sent = False
+            instance_command_runner: InstanceCommandRunner = InstanceCommandRunner(self._instance_id, self._aws_access_key_id,
+                                                                                   self._aws_secret_access_key, self._region_name)
+            if self._current_game is not None:
+                await instance_command_runner.run_commands(config["server"]["games"][self._current_game]["commands"]["stop"])
+            await instance_command_runner.run_commands(config["server"]["games"][game]["commands"]["start"])
 
             # Save the currently running game and update the bot activity
             await self._set_current_game(game)
 
             # Attempt to reach the game server,
             progress_message_text: str = "The game running on the server has been changed. "\
-                f"Connect to `{self.instance_description.public_ip_address}:{config['server']['games'][game]['port']}` to join the fun!"
+                f"Connect to `{instance_description.public_ip_address}:{config['server']['games'][game]['port']}` to join the fun!"
             try:
-                command_invocation = await instance_command_runner.run_commands_until_success(config['server']['games'][game]['commands']['ping'])
-                _log.info(command_invocation)
+                await instance_command_runner.run_commands_until_success(config["server"]["games"][game]["commands"]["ping"])
             except (CommandExceededAttempts, CommandExceededWaitTime):
                 progress_message_text = "The game running on the server has been changed, but was unable to be reached, so something may have gone "\
-                    f"wrong. Try connecting to `{self.instance_description.public_ip_address}:{config['server']['games'][game]['port']}` and contact "\
+                    f"wrong. Try connecting to `{instance_description.public_ip_address}:{config['server']['games'][game]['port']}` and contact "\
                     "an admin if you're unable to connect."
 
             # Delete the progress message and send a confirmation message
             await progress_message.delete()
             await message_util.send_simple_embed(context, progress_message_text)
+
+            # Start the instance query loop
+            self.query_instance_usage.start()
 
     @server_change.error
     async def server_change_error(self, context: commands.Context, exception: commands.CommandError) -> None:
@@ -440,7 +363,7 @@ class Server(commands.Cog):
         """
         if isinstance(exception, commands.MissingRequiredArgument):
             message_text: str = "You must specify which game you wish to switch to.\n"\
-                f"For example: `{self.bot.command_prefix}{context.command} {list(config['server']['games'].keys())[0]}`"
+                f"For example: `{self._bot.command_prefix}{context.command} {list(config['server']['games'].keys())[0]}`"
             await message_util.send_simple_embed(context, message_text)
         elif isinstance(exception, InvalidGameError):
             await message_util.send_simple_embed(context, f"The game _{exception.requested_game}_ isn't setup to run on the server.")
@@ -450,6 +373,77 @@ class Server(commands.Cog):
             await message_util.send_simple_embed(context, f"The server is already running the game _{exception.requested_game}_.")
         else:
             await self._log_command_error(context, exception)
+
+    # *** server status *********************************************************
+
+    @server.command(name = "status")
+    @commands.has_any_role(config["server"]["admin-command-role"], config["server"]["user-command-role"])
+    @custom_checks.is_channel_for_role(config["server"]["command-channel"], config["server"]["user-command-role"])
+    @commands.max_concurrency(1)
+    async def server_status(self, context: commands.Context) -> None:
+        """Print the status of the AWS instance.
+
+        Args:
+            context (commands.Context): The context of the command.
+        """
+        async with self._instance_lock:
+            admin_status = discord.utils.get(context_util.get_author(context).roles, name = config["server"]["admin-command-role"])
+            if not admin_status:
+                self._check_no_maintenance()
+
+            instance_description: InstanceDescription = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name)\
+                .get_instance_description()
+
+            # Retrieve the current player count
+            current_game: str = self._current_game if self._current_game is not None else "None"
+            if self._current_game is not None:
+                instance_command_runner: InstanceCommandRunner = InstanceCommandRunner(self._instance_id, self._aws_access_key_id,
+                                                                                       self._aws_secret_access_key, self._region_name)
+                invocation: CommandInvocation = await instance_command_runner\
+                    .run_commands(config["server"]["games"][self._current_game]["commands"]["query-player-count"])
+                player_count: int = int(invocation.output) if invocation.status == CommandStatus.SUCCESS and invocation.output.isdigit() else 0
+
+            if admin_status:
+                # Get additional admin-only information, including the launch time and server ping
+                state: str = f":{self._get_state_color(instance_description.state)}_circle: {instance_description.state.value.capitalize()}"
+                launch_time: datetime = instance_description.launch_time.astimezone(pytz.timezone(config["server"]["default-timezone"]))
+                if self._current_game is not None:
+                    invocation = await instance_command_runner.run_commands(config["server"]["games"][self._current_game]["commands"]["ping"])
+                    ping: str = invocation.output if invocation.status == CommandStatus.SUCCESS else "Connection failed"
+
+                # Create and send the embed with user and admin-only information
+                embed: discord.Embed = discord.Embed(title = f"Status of {instance_description.image_id}",
+                                                     color = int(config["colors"]["default"], 0))
+                message_util.add_field_to_embed(embed, "State", state)
+                if instance_description.state == InstanceState.RUNNING:
+                    message_util.add_field_to_embed(embed, "Current game", f"{':warning: ' if self._current_game is None else ''}{current_game}")
+                    if self._current_game is not None:
+                        message_util.add_field_to_embed(embed, "Game server ping", ping)
+                        message_util.add_field_to_embed(embed, "Current players", str(player_count))
+                    message_util.add_field_to_embed(embed, "IP address", f"`{instance_description.public_ip_address}`")
+                    message_util.add_field_to_embed(embed, "DNS name", f"`{instance_description.public_dns_name}`")
+                message_util.add_field_to_embed(embed, "Last launch time", str(launch_time))
+                await context.send(embed = embed)
+            else:
+                # Create and send the simple embed with user information
+                message = f"The server is currently {instance_description.state.value.lower()}"
+                if instance_description.state == InstanceState.RUNNING and self._current_game is not None:
+                    message += f" the game {self._current_game} and there {'is' if player_count == 1 else 'are'} "\
+                        f"{player_count} {'person' if player_count == 1 else 'people'} playing. Connect to "\
+                        f"`{instance_description.public_ip_address}:{config['server']['games'][self._current_game]['port']}` to join the fun!"
+                else:
+                    message += "."
+                await message_util.send_simple_embed(context, message)
+
+    @server_status.error
+    async def server_status_error(self, context: commands.Context, exception: commands.CommandError) -> None:
+        """Error handler for the server status command, which prints an error message based on the error raised.
+
+        Args:
+            context (commands.Context): The context of the command.
+            exception (commands.CommandError): The exception which was thrown by the command.
+        """
+        await self._log_command_error(context, exception)
 
     # *** server disable ********************************************************
 
@@ -461,10 +455,10 @@ class Server(commands.Cog):
         Args:
             context (commands.Context): The context of the command.
         """
-        if self.maintenance:
+        if self._maintenance:
             await message_util.send_simple_embed(context, "Server commands are already disabled for maintenance.")
         else:
-            self.maintenance = True
+            self._maintenance = True
             await message_util.send_simple_embed(context, "Server commands have been temporarily disabled to allow for server maintenance.")
 
     # *** server enable *********************************************************
@@ -477,10 +471,10 @@ class Server(commands.Cog):
         Args:
             context (commands.Context): The context of the command.
         """
-        if not self.maintenance:
+        if not self._maintenance:
             await message_util.send_simple_embed(context, "Server commands aren't currently disabled for maintenance.")
         else:
-            self.maintenance = False
+            self._maintenance = False
             await message_util.send_simple_embed(context, "Server maintenance has finished and the server is ready for games again!")
 
     @server_disable.error
@@ -494,61 +488,91 @@ class Server(commands.Cog):
         """
         await self._log_command_error(context, exception)
 
-    # *** on_member_update ******************************************************
+    # *** query_instance_usage **************************************************
 
-    @commands.Cog.listener()
-    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        """When a member status is updated, if all users aren't playing the currently running game and the server is still running, send a reminder message.
+    @tasks.loop(minutes = config["server"]["auto-shutdown-query-delay"])
+    async def query_instance_usage(self) -> None:
+        """Every three minutes, query the instance to determine if anyone is playing the current game, and shut down the server after 15 minutes if not.
+
+        Raises:
+            InvalidInstanceStateError: Raised when the instance has an unexpected state.
+        """
+        if self.query_instance_usage.current_loop == 0:
+            self._instance_query_no_players_count = -1
+
+        async with self._instance_lock:
+            # Ensure maintenance isn't in progress
+            if self._maintenance:
+                await error_util.log_warning(_log, self._bot, "Instance query loop running while in maintenance mode")
+                return
+
+            # Get the instance description
+            instance_manager: InstanceManager = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key,
+                                                                self._region_name)
+            instance_description: InstanceDescription = instance_manager.get_instance_description()
+
+            # Ensure the instance is running and the current_game is set
+            if instance_description.state != InstanceState.RUNNING:
+                raise InvalidInstanceStateError(instance_description.state.value)
+            if self._current_game is None:
+                self._warn_instance_running_without_game()
+                self.query_instance_usage.stop()
+                return
+
+            # Query for the number of players on the server currently
+            instance_command_runner: InstanceCommandRunner = InstanceCommandRunner(self._instance_id, self._aws_access_key_id,
+                                                                                   self._aws_secret_access_key, self._region_name)
+            invocation: CommandInvocation = await instance_command_runner\
+                .run_commands(config["server"]["games"][self._current_game]["commands"]["query-player-count"])
+            player_count: int = int(invocation.output) if invocation.status == CommandStatus.SUCCESS and invocation.output.isdigit() else 0
+
+            if player_count != 0:
+                self._instance_query_no_players_count = -1
+                return
+
+            self._instance_query_no_players_count += 1
+
+            message_text: str = f"The server is running and no one has been playing {self._current_game} for "\
+                f"{self._instance_query_no_players_count * config['server']['auto-shutdown-query-delay']} minutes. "
+            if self._instance_query_no_players_count < round(config["server"]["auto-shutdown-delay"] / config["server"]["auto-shutdown-query-delay"]):
+                if self._instance_query_no_players_count > 0:
+                    await message_util.send_simple_here_mention_to_channel(self._bot, config["server"]["command-channel"])
+                    message_text += f"Please run `{self._bot.command_prefix}server stop` to stop the server if you're finished playing!"
+                    await message_util.send_simple_embed_to_channel(self._bot, config["server"]["command-channel"], message_text)
+            else:
+                await message_util.send_simple_here_mention_to_channel(self._bot, config["server"]["command-channel"])
+                message_text += "The server will now be automatically shut down."
+                await message_util.send_simple_embed_to_channel(self._bot, config["server"]["command-channel"], message_text)
+
+                # Stop the current game
+                await instance_command_runner.run_commands(config["server"]["games"][self._current_game]["commands"]["stop"])
+
+                # Stop the instance
+                await instance_manager.stop_instance()
+
+                # Clear the current game and the bot activity
+                await self._set_current_game(None)
+
+                # Stop the instance query loop
+                self.query_instance_usage.stop()
+
+    @query_instance_usage.error # type: ignore[arg-type]
+    async def query_instance_usage_error(self, exception: Exception) -> None:
+        """Error handler for the instance query loop, which prints an error message based on the error raised.
 
         Args:
-            before (discord.Member): The previous status of the member who's status changed.
-            after (discord.Member): The current status of the member who's status changed.
+            exception (commands.CommandError): The exception which was thrown by the command.
         """
-        # Attempt to avoid sending a notification if the server state is changing from a command or if the server is undergoing maintenance
-        if not self.maintenance and not self.instance_lock.locked():
-            # Get the instance description if it hasn't been set yet
-            if self.instance_description is None:
-                self.instance_description = InstanceManager(self._instance_id, self._aws_access_key_id, self._aws_secret_access_key, self._region_name).get_instance_description()
-                _log.info(self.instance_description)
-
-            # Only send a reminder if the server is actually running
-            if self.instance_description.state == InstanceState.RUNNING:
-                # Raise an error if the server is running and there is no current game
-                if self.current_game is None:
-                    await self._warn_instance_running_without_game()
-                else:
-                    # If the reminder has already been sent, check if anyone has started the game again, so the reminder can be resent
-                    if self.stop_reminder_sent:
-                        if (not any(activity_util.get_activity_name(activity) == self.current_game for activity in before.activities) and
-                                any(activity_util.get_activity_name(activity) == self.current_game for activity in after.activities)):
-                            self.stop_reminder_sent = False
-
-                    # If the reminder hasn't been sent, ensure that someone just stopped playing the game and that no one else is playing it, and if so,
-                    # send a reminder
-                    else:
-                        if (any(activity_util.get_activity_name(activity) == self.current_game for activity in before.activities) and
-                                not any(activity_util.get_activity_name(activity) == self.current_game for activity in after.activities)):
-                            anyone_playing_game: bool = False
-                            for member in after.guild.members:
-                                if not member.bot:
-                                    for activity in member.activities:
-                                        if activity_util.get_activity_name(activity) == self.current_game:
-                                            anyone_playing_game = True
-
-                            if not anyone_playing_game:
-                                await message_util.send_simple_here_mention_to_channel(after.guild, config["server"]["command-channel"])
-                                message_text: str = f"The server is running, but it looks like no one is playing {self.current_game} anymore. "\
-                                    f"Please run `{self.bot.command_prefix}server stop` to stop the server if you're finished playing!"
-                                await message_util.send_simple_embed_to_channel(after.guild, config["server"]["command-channel"], message_text)
-                                self.stop_reminder_sent = True
+        await error_util.log_error(_log, self._bot, exception)
 
     # *** _log_command_error ****************************************************
 
     async def _log_command_error(self, context: commands.Context, exception: commands.CommandError) -> None:
         if isinstance(exception, ServerMaintenanceInProgress):
-            await message_util.send_simple_embed(context, f"The command `{self.bot.command_prefix}{context.command}` Unable to stop the server as it is currently undergoing maintenance. Please try again later.")
+            await message_util.send_simple_embed(context, f"The command `{self._bot.command_prefix}{context.command}` is currently disabled, as the "
+                                                 "server as it is currently undergoing maintenance. Please try again later.")
         else:
-            await error_util.log_command_error(_log, self.bot, context, exception)
+            await error_util.log_command_error(_log, self._bot, context, exception)
 
     # *** _check_valid_game *****************************************************
 
@@ -560,20 +584,20 @@ class Server(commands.Cog):
     # *** _check_no_maintenance *************************************************
 
     def _check_no_maintenance(self) -> None:
-        if self.maintenance:
+        if self._maintenance:
             raise ServerMaintenanceInProgress()
 
     # *** _check_game_not_running ***********************************************
 
     def _check_game_not_running(self, game: str) -> None:
-        if game == self.current_game:
+        if game == self._current_game:
             raise GameAlreadyRunningError(game)
 
     # *** _warn_instance_running_without_game ***********************************
 
     async def _warn_instance_running_without_game(self) -> None:
         """Print a warning that the instance is running, but the current_game is None."""
-        await error_util.log_warning(_log, self.bot, "Instance is running, but no game server is running on it")
+        await error_util.log_warning(_log, self._bot, "Instance is running, but no game server is running on it")
 
     # *** _set_current_game *****************************************************
 
@@ -589,14 +613,15 @@ class Server(commands.Cog):
         if game is not None and game not in config["server"]["games"]:
             raise InvalidGameError(game)
 
-        self.current_game = game
+        self._current_game = game
 
         activity: Optional[discord.activity.Game] = discord.Game(game) if game else None
-        await self.bot.change_presence(activity = activity)
+        await self._bot.change_presence(activity = activity)
 
     # *** _get_state_color ******************************************************
 
-    def _get_state_color(self) -> str:
+    @staticmethod
+    def _get_state_color(instance_state: InstanceState) -> str:
         """Return a string containing the emote colour for the current AWS instance state.
 
         Raises:
@@ -605,16 +630,13 @@ class Server(commands.Cog):
         Returns:
             str: The colour for the current state.
         """
-        if self.instance_description is None:
-            raise ValueError("Instance description has no value")
-
-        if self.instance_description.state == InstanceState.RUNNING:
+        if instance_state == InstanceState.RUNNING:
             return "green"
-        if self.instance_description.state == InstanceState.STOPPED:
+        if instance_state == InstanceState.STOPPED:
             return "red"
-        if self.instance_description.state == InstanceState.PENDING:
+        if instance_state == InstanceState.PENDING:
             return "yellow"
-        if self.instance_description.state == InstanceState.STOPPING:
+        if instance_state == InstanceState.STOPPING:
             return "orange"
 
         return "black"

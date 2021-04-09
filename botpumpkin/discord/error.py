@@ -36,12 +36,27 @@ async def log_command_error(log: logging.Logger, bot: commands.Bot, context: com
 
         error_message: str = f"Unhandled error in `{bot.command_prefix}{context.command}`: {exception}"
         error_traceback: str = ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))
-        await log_error(log, bot, error_message, error_traceback)
+        await log_error_message(log, bot, error_message, error_traceback)
 
 
 # *** log_error *************************************************************
 
-async def log_error(log: logging.Logger, bot: commands.Bot, error_message: str, error_traceback: str) -> None:
+async def log_error(log: logging.Logger, bot: commands.Bot, exception: Exception) -> None:
+    """Log the given exception to the given logger and send a message to the owner of the given bot.
+
+    Args:
+        log (logging.Logger): The logger to log errors to.
+        bot (commands.Bot): The bot to use to send error messages.
+        exception (Exception): The exception to log.
+    """
+    error_message: str = "Unhandled error"
+    error_traceback: str = ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))
+    await log_error_message(log, bot, error_message, error_traceback)
+
+
+# *** log_error_message *****************************************************
+
+async def log_error_message(log: logging.Logger, bot: commands.Bot, error_message: str, error_traceback: str) -> None:
     """Log the given error message and stack trace to the given logger and send a message to the owner of the given bot.
 
     Args:

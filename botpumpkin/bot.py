@@ -62,7 +62,7 @@ class BotPumpkin(commands.Bot):
 
         error_message: str = f"Unhandled error in {event_method}"
         error_traceback: str = ''.join(traceback.format_exc())
-        await error_util.log_error(_log, self, error_message, error_traceback)
+        await error_util.log_error_message(_log, self, error_message, error_traceback)
 
     # *** _add_cogs *************************************************************
 

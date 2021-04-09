@@ -13,11 +13,7 @@ from botpumpkin.config import config
 # *** Help ******************************************************************
 
 class Help(commands.Cog):
-    """Command cog containing a simple collection of help commands.
-
-    Attributes:
-        bot (commands.Bot): The bot the cog will be added to.
-    """
+    """Command cog containing a simple collection of help commands."""
 
     def __init__(self, bot: commands.Bot):
         """Initialize the Help cog.
@@ -25,7 +21,7 @@ class Help(commands.Cog):
         Args:
             bot (commands.Bot): The bot the cog will be added to.
         """
-        self.bot: commands.Bot = bot
+        self._bot: commands.Bot = bot
 
     # *** help ******************************************************************
 
@@ -39,12 +35,14 @@ class Help(commands.Cog):
         if context.invoked_subcommand is None:
             description_text: str = "BotPumpkin is a custom bot for starting and stopping our game server, and for doing some other fun and useful things."
             embed: discord.Embed = discord.Embed(description = description_text, color = int(config["colors"]["default"], 0))
-            message_util.add_field_to_embed(embed, "`.slap`", "Let BotPumpkin teach someone else a lesson")
-            message_util.add_field_to_embed(embed, "`.server start`", "Starts our game server")
-            message_util.add_field_to_embed(embed, "`.server stop`", "Stops our game server")
+            message_util.add_field_to_embed(embed, "`.slap <user>`", "Let BotPumpkin teach someone else a lesson")
+            message_util.add_field_to_embed(embed, "`.server start <game>`", "Starts the given game on the game server")
+            message_util.add_field_to_embed(embed, "`.server stop`", "Stops the game server")
+            message_util.add_field_to_embed(embed, "`.server change <game>`", "Changes the game running on the game server")
+            message_util.add_field_to_embed(embed, "`.server status`", "Displays useful status information about the game server")
             message_util.add_field_to_embed(embed, "`.help Groovy`", "Displays commonly used commands for Groovy")
             message_util.add_field_to_embed(embed, "`.help sesh`", "Displays commonly used commands for sesh")
-            embed.set_author(name = self.bot.user.name, icon_url = str(self.bot.user.avatar_url))
+            embed.set_author(name = self._bot.user.name, icon_url = str(self._bot.user.avatar_url))
             await context.send(embed = embed)
 
     # *** help groovy ***********************************************************
@@ -57,7 +55,7 @@ class Help(commands.Cog):
             context (commands.Context): The context of the command.
         """
         groovy: Optional[discord.User] = None
-        for user in self.bot.users:
+        for user in self._bot.users:
             if user.name == "Groovy":
                 groovy = user
                 break
@@ -96,7 +94,7 @@ class Help(commands.Cog):
             context (commands.Context): The context of the command.
         """
         sesh: Optional[discord.User] = None
-        for user in self.bot.users:
+        for user in self._bot.users:
             if user.name == "sesh":
                 sesh = user
                 break

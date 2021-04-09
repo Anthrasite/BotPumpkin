@@ -1,6 +1,7 @@
 {
     "prefix": ".",
     "owner-id": 432781380418535455,
+    "guild-id": 617869698490564611,
     "colors": {
         "default": "0xffa500",
         "error": "0xda2d44",
@@ -54,6 +55,8 @@
                     ]
                 }
             }
-        }
+        },
+        "auto-shutdown-query-delay": 3,
+        "auto-shutdown-delay": 15
     }
 }

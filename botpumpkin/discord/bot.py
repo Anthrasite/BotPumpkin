@@ -21,3 +21,21 @@ def get_owner_if_set(bot: commands.Bot) -> Optional[discord.User]:
     if owner_id is None:
         return None
     return bot.get_user(owner_id)
+
+
+# *** get_guild *************************************************************
+
+def get_guild(bot: commands.Bot, guild_id: int) -> discord.Guild:
+    """Return the guild with the given id from the given bot.
+
+    Args:
+        bot (commands.Bot): The bot to return the guild from.
+        guild_id (int): The id of the guild.
+
+    Returns:
+        discord.Guild: The guild with the given id.
+    """
+    guild: Optional[discord.Guild] = bot.get_guild(guild_id)
+    if guild is None:
+        raise ValueError("Bot not in guild")
+    return guild

@@ -1,5 +1,6 @@
 """A collection of classes to assist with using an AWS EC2 client from the boto3 library."""
 import asyncio
+import logging
 from datetime import datetime
 from enum import Enum
 from typing import Awaitable, Literal, Optional, Union
@@ -9,6 +10,8 @@ import boto3
 import discord.ext.commands as commands
 from mypy_boto3_ec2.client import EC2Client
 from mypy_boto3_ec2.type_defs import DescribeInstancesResultTypeDef
+
+_log: logging.Logger = logging.getLogger(__name__)
 
 
 # *** NoInstanceDescriptionError ********************************************
@@ -102,7 +105,9 @@ class InstanceManager:
             InstanceDescription: The description of the instance.
         """
         response: DescribeInstancesResultTypeDef = self._client.describe_instances(InstanceIds = [self._instance_id])
-        return InstanceDescription(response)
+        description: InstanceDescription = InstanceDescription(response)
+        _log.info(description)
+        return description
 
     # *** start_instance ********************************************************
 
